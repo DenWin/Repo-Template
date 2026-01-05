@@ -66,11 +66,23 @@ add_template() {
 
 # ---------- base templates ----------
 TEMPLATES=()
-add_template "Global"
-add_template "macOS"
+add_template "Git"
+
 add_template "Windows"
+add_template "macOS"
 add_template "Linux"
+
+add_template "JetBrains+all"
+add_template "VisualStudio"
 add_template "VisualStudioCode"
+add_template "Eclipse"
+add_template "Xcode"
+add_template "AndroidStudio"
+add_template "NetBeans"
+add_template "Vim"
+add_template "Emacs"
+add_template "SublimeText"
+add_template "NotepadPP"
 
 # ---------- framework marker detection (explicit, explainable) ----------
 # These are additive “hints”; the GitHub /languages endpoint is the primary signal.
@@ -96,7 +108,7 @@ if [[ -n "${GITHUB_TOKEN:-}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
     -H "Accept: application/vnd.github+json" \
     "https://api.github.com/repos/${GITHUB_REPOSITORY}/languages" 2>/dev/null || echo "{}")"
-  
+
   # If API call fails or returns empty, log it but continue
   if [[ "$LANG_JSON" == "{}" ]] || [[ -z "$LANG_JSON" ]]; then
     echo "No language data available from GitHub API (repo may be empty or API call failed)"
@@ -125,31 +137,17 @@ echo "Templates: $CSV"
 # Fetch gitignore content from Toptal with retry logic
 if ! curl -fsSL "https://www.toptal.com/developers/gitignore/api/${CSV}" -o "$TMP_FILE"; then
   echo "Error: Failed to fetch gitignore templates from Toptal API"
-  echo "Falling back to basic template..."
-  
-  # Create a basic .gitignore if API fails
-  cat > "$TMP_FILE" << 'EOF'
-# Created by basic fallback template
+  echo "Using comprehensive fallback template..."
 
-# OS Files
-.DS_Store
-Thumbs.db
-
-# Editor Files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Temporary Files
-*.tmp
-*.temp
-*.log
-
-# Dependencies
-node_modules/
-EOF
+  # Use comprehensive fallback file
+  FALLBACK_FILE=".github/scripts/.gitignore.fallback"
+  if [[ -f "$FALLBACK_FILE" ]]; then
+    cp "$FALLBACK_FILE" "$TMP_FILE"
+    echo "Using fallback template from $FALLBACK_FILE"
+  else
+    echo "Error: Fallback file $FALLBACK_FILE not found"
+    exit 1
+  fi
 fi
 
 # Normalize line endings just in case
