@@ -88,13 +88,20 @@ if have_file "Dockerfile" || have_file "docker-compose.yml" || have_file "compos
 
 # ---------- language detection via GitHub API ----------
 # Uses the repository language breakdown that GitHub computes.
-# Endpoint: GET /repos/{owner}/{repo}/languages :contentReference[oaicite:3]{index=3}
+# Endpoint: GET /repos/{owner}/{repo}/languages
 LANG_JSON=""
 if [[ -n "${GITHUB_TOKEN:-}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+  echo "Fetching language data for ${GITHUB_REPOSITORY}..."
   LANG_JSON="$(curl -fsSL \
     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
     -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/${GITHUB_REPOSITORY}/languages" || true)"
+    "https://api.github.com/repos/${GITHUB_REPOSITORY}/languages" 2>/dev/null || echo "{}")"
+  
+  # If API call fails or returns empty, log it but continue
+  if [[ "$LANG_JSON" == "{}" ]] || [[ -z "$LANG_JSON" ]]; then
+    echo "No language data available from GitHub API (repo may be empty or API call failed)"
+    LANG_JSON=""
+  fi
 fi
 
 if [[ -n "$LANG_JSON" ]]; then
@@ -114,7 +121,36 @@ fi
 CSV="$(IFS=,; echo "${TEMPLATES[*]}")"
 
 echo "Templates: $CSV"
-curl -fsSL "https://www.toptal.com/developers/gitignore/api/${CSV}" -o "$TMP_FILE"
+
+# Fetch gitignore content from Toptal with retry logic
+if ! curl -fsSL "https://www.toptal.com/developers/gitignore/api/${CSV}" -o "$TMP_FILE"; then
+  echo "Error: Failed to fetch gitignore templates from Toptal API"
+  echo "Falling back to basic template..."
+  
+  # Create a basic .gitignore if API fails
+  cat > "$TMP_FILE" << 'EOF'
+# Created by basic fallback template
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary Files
+*.tmp
+*.temp
+*.log
+
+# Dependencies
+node_modules/
+EOF
+fi
 
 # Normalize line endings just in case
 perl -pi -e 's/\r\n/\n/g' "$TMP_FILE"
