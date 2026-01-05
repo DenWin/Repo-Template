@@ -43,6 +43,51 @@ jobs:
 
       # For pushes: try to open/update an automated PR with the change.
       # If PR creation fails due to permissions, just commit directly to main.
+      - name: Check for existing PR and generate appropriate branch name
+        if: ${{ github.event_name == 'push' && steps.gen.outputs.changed == 'true' && !startsWith(github.ref, 'refs/heads/create-pull-request/') }}
+        id: check-pr
+        run: |
+          # Check for open PRs with priority: standard branch first, then most recent timestamped
+
+          # First priority: open standard branch PR
+          standard_open_pr=$(gh pr list --head "create-pull-request/auto-gitignore" --state open --json number --jq '.[0].number // empty')
+
+          if [[ -n "$standard_open_pr" ]]; then
+            echo "Found open standard PR #$standard_open_pr, will update it"
+            echo "branch_name=create-pull-request/auto-gitignore" >> $GITHUB_OUTPUT
+            echo "pr_title=chore: update .gitignore" >> $GITHUB_OUTPUT
+          else
+            # Second priority: most recent timestamped open PR (sorted by creation date desc)
+            timestamped_open_pr=$(gh pr list --head "create-pull-request/auto-gitignore-*" --state open --json number,headRefName,createdAt --jq 'sort_by(.createdAt) | reverse | .[0] // empty')
+
+            if [[ -n "$timestamped_open_pr" ]]; then
+              branch_name=$(echo "$timestamped_open_pr" | jq -r '.headRefName')
+              pr_number=$(echo "$timestamped_open_pr" | jq -r '.number')
+              echo "Found open timestamped PR #$pr_number on branch $branch_name, will update it"
+              echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
+              echo "pr_title=chore: update .gitignore" >> $GITHUB_OUTPUT
+            else
+              # No open PRs, check if standard branch has closed PRs
+              closed_standard_pr=$(gh pr list --head create-pull-request/auto-gitignore --state closed --json number --jq '.[0].number // empty')
+
+              if [[ -n "$closed_standard_pr" ]]; then
+                # Standard branch was closed, create new timestamped branch
+                timestamp=$(date +%Y%m%d-%H%M%S)
+                branch_name="create-pull-request/auto-gitignore-${timestamp}"
+                echo "Found closed standard PR #$closed_standard_pr, creating new branch: $branch_name"
+                echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
+                echo "pr_title=chore: update .gitignore (${timestamp})" >> $GITHUB_OUTPUT
+              else
+                # No PRs exist, use standard branch name
+                echo "No existing PRs found, using standard branch name"
+                echo "branch_name=create-pull-request/auto-gitignore" >> $GITHUB_OUTPUT
+                echo "pr_title=chore: update .gitignore" >> $GITHUB_OUTPUT
+              fi
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create/update PR for .gitignore
         if: ${{ github.event_name == 'push' && steps.gen.outputs.changed == 'true' && !startsWith(github.ref, 'refs/heads/create-pull-request/') }}
         id: create-pr
@@ -50,10 +95,12 @@ jobs:
         continue-on-error: true
         with:
           commit-message: "chore: update .gitignore"
-          title: "chore: update .gitignore"
+          title: ${{ steps.check-pr.outputs.pr_title }}
           body: |
             Automated .gitignore refresh based on detected languages/frameworks and Toptal templates.
-          branch: create-pull-request/auto-gitignore
+
+            ${{ steps.check-pr.outputs.branch_name != 'create-pull-request/auto-gitignore' && 'Note: A previous auto-gitignore PR was closed, so this creates a new PR to respect that decision.' || '' }}
+          branch: ${{ steps.check-pr.outputs.branch_name }}
           delete-branch: true
           add-paths: |
             .gitignore
